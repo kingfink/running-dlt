@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# dlt
+.dlt/secrets.toml
+*.duckdb
+*.duckdb.wal
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/

@@ -1,0 +1,12 @@
+# Non-secret dlt config. Real secrets live in .dlt/secrets.toml (gitignored)
+# or in environment variables (production).
+
+[runtime]
+log_level = "INFO"
+
+[destination.bigquery]
+location = "US"
+
+[destination.motherduck]
+# Database name on MotherDuck. The schema is set per-pipeline via dataset_name.
+database = "strava"
