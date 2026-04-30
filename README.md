@@ -27,8 +27,8 @@ Writes to `strava_dev_$USER`. Re-runs are idempotent (merge on `id`).
 Three Modal Secrets:
 
 - `strava-oauth` — `SOURCES__STRAVA__CLIENT_ID`, `..._CLIENT_SECRET`, `..._REFRESH_TOKEN`
-- `dlt-bigquery` — `DESTINATION__BIGQUERY__CREDENTIALS__PROJECT_ID`, `..._PRIVATE_KEY`, `..._CLIENT_EMAIL` (service account scoped to one BQ dataset, plus `roles/bigquery.jobUser` at project level)
-- `dlt-motherduck` — `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
+- `running-dlt-bq-sync` — `DESTINATION__BIGQUERY__CREDENTIALS__PROJECT_ID`, `..._PRIVATE_KEY`, `..._CLIENT_EMAIL` (service account scoped to one BQ dataset, plus `roles/bigquery.jobUser` at project level)
+- `running-dlt-md-sync` — `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
 
 ```bash
 uv run modal deploy modal_app.py                            # registers the daily cron

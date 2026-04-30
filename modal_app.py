@@ -23,8 +23,8 @@ app = modal.App("strava-dlt")
 
 SECRETS = [
     modal.Secret.from_name("strava-oauth"),     # SOURCES__STRAVA__CLIENT_ID/SECRET/REFRESH_TOKEN
-    modal.Secret.from_name("dlt-bigquery"),     # DESTINATION__BIGQUERY__CREDENTIALS__*
-    modal.Secret.from_name("dlt-motherduck"),   # DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD
+    modal.Secret.from_name("running-dlt-bq-sync"),     # DESTINATION__BIGQUERY__CREDENTIALS__*
+    modal.Secret.from_name("running-dlt-md-sync"),     # DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD
 ]
 
 
