@@ -77,7 +77,7 @@ def test_source_loads_to_duckdb(tmp_path: Path, stub_strava, monkeypatch):
             client_id="cid",
             client_secret="csec",
             refresh_token="rt",
-            refetch_days=7,
+            lookback_days=7,
         )
     )
     assert info.has_failed_jobs is False

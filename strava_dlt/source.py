@@ -3,33 +3,34 @@ from typing import Any
 
 import dlt
 
-from strava_dlt.auth import StravaAuth, StravaClient
+from strava_dlt.auth import StravaClient
 
-DEFAULT_REFETCH_DAYS = 7
+DEFAULT_LOOKBACK_DAYS = 7
 
-# Top-level fields in getActivityById that are objects or arrays. Forced to JSON
-# columns so they live on the parent `activities` row instead of being expanded
-# into child tables.
+# Strava's getActivityById returns several nested objects/arrays. By default,
+# dlt would explode each into a child table (`activities__splits_metric`,
+# `activities__laps`, ...). With `max_table_nesting=0` on the source plus
+# `data_type=json` hints here, every listed field stays as a single JSON column
+# on the parent `activities` row.
 _JSON_COLUMNS: dict[str, dict[str, Any]] = {
-    "splits_metric": {"data_type": "json"},
-    "splits_standard": {"data_type": "json"},
-    "laps": {"data_type": "json"},
-    "segment_efforts": {"data_type": "json"},
-    "best_efforts": {"data_type": "json"},
-    "photos": {"data_type": "json"},
-    "stats_visibility": {"data_type": "json"},
-    "map": {"data_type": "json"},
-    "gear": {"data_type": "json"},
-    "athlete": {"data_type": "json"},
-    "start_latlng": {"data_type": "json"},
-    "end_latlng": {"data_type": "json"},
-    "similar_activities": {"data_type": "json"},
-    "available_zones": {"data_type": "json"},
+    f: {"data_type": "json"}
+    for f in (
+        "splits_metric",
+        "splits_standard",
+        "laps",
+        "segment_efforts",
+        "best_efforts",
+        "photos",
+        "stats_visibility",
+        "map",
+        "gear",
+        "athlete",
+        "start_latlng",
+        "end_latlng",
+        "similar_activities",
+        "available_zones",
+    )
 }
-
-
-def _parse_iso_to_epoch(value: str) -> int:
-    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
 
 
 @dlt.source(name="strava", max_table_nesting=0)
@@ -37,24 +38,23 @@ def strava_source(
     client_id: str = dlt.secrets.value,
     client_secret: str = dlt.secrets.value,
     refresh_token: str = dlt.secrets.value,
-    refetch_days: int = DEFAULT_REFETCH_DAYS,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 ):
     """Strava activity source.
 
-    Parent resource paginates the athlete-activity list; a transformer fans out
-    to getActivityById for each summary. The list endpoint's payload is a
-    strict subset of the detail endpoint, so we only persist the detailed
-    `activities` table — the parent is `selected=False`.
+    `activity_ids` paginates the athlete-activity list (parent, not persisted).
+    `activities` fans out via `getActivityById` and is the only table written.
     """
-    auth = StravaAuth(client_id, client_secret, refresh_token)
-    client = StravaClient(auth)
+    client = StravaClient(client_id, client_secret, refresh_token)
 
     @dlt.resource(name="activity_ids", selected=False, write_disposition="replace")
     def activity_ids():
+        # Manual trailing-window watermark. We can't use dlt.sources.incremental
+        # here because Strava's `after` is exclusive and doesn't natively support
+        # a "re-pull the last N days" lookback for capturing edits.
         state = dlt.current.resource_state()
         last_synced_epoch = int(state.get("last_synced_epoch", 0))
-        lookback = max(0, refetch_days) * 24 * 3600
-        after = max(0, last_synced_epoch - lookback)
+        after = max(0, last_synced_epoch - max(0, lookback_days) * 86400)
 
         max_seen = last_synced_epoch
         page = 1
@@ -63,15 +63,13 @@ def strava_source(
                 "/athlete/activities",
                 params={"after": after, "page": page, "per_page": 200},
             )
+            assert isinstance(batch, list)
             if not batch:
                 break
-            assert isinstance(batch, list)
             for activity in batch:
-                start_date = activity.get("start_date")
-                if start_date:
-                    ts = _parse_iso_to_epoch(start_date)
-                    if ts > max_seen:
-                        max_seen = ts
+                if start := activity.get("start_date"):
+                    ts = int(datetime.fromisoformat(start.replace("Z", "+00:00")).timestamp())
+                    max_seen = max(max_seen, ts)
                 yield activity
             if len(batch) < 200:
                 break

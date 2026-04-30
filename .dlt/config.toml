@@ -8,5 +8,6 @@ log_level = "INFO"
 location = "US"
 
 [destination.motherduck]
-# Database name on MotherDuck. The schema is set per-pipeline via dataset_name.
-database = "strava"
+# Top-level MotherDuck database. Per-pipeline `dataset_name` is the schema
+# inside it, so this can host multiple datasets (e.g. raw.strava, raw.foo).
+database = "raw"
