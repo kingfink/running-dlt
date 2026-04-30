@@ -1,8 +1,14 @@
-"""Modal entrypoint for the Strava → BigQuery + MotherDuck dlt pipelines.
+"""Strava → BigQuery + MotherDuck dlt pipelines.
 
+Cron + Modal:
     modal deploy modal_app.py                              # registers the daily cron
-    modal run modal_app.py::sync                           # ad-hoc run with default 7-day window
+    modal run modal_app.py::sync                           # ad-hoc prod run on Modal
     modal run modal_app.py::sync --lookback-days 99999     # full backfill / escape hatch
+
+Local dev (against `strava_dev_$USER`, reading .dlt/secrets.toml):
+    python modal_app.py
+    python modal_app.py --lookback-days 90
+    python modal_app.py --destinations motherduck
 """
 
 import modal
@@ -37,3 +43,29 @@ def sync(lookback_days: int = 7) -> None:
     from strava_dlt.pipeline import run_pipelines
 
     run_pipelines(target="prod", lookback_days=lookback_days)
+
+
+if __name__ == "__main__":
+    import argparse
+    import logging
+    import os
+
+    parser = argparse.ArgumentParser(description="Local dev run against `strava_dev_$USER`.")
+    parser.add_argument("--lookback-days", type=int, default=7)
+    parser.add_argument(
+        "--destinations",
+        default="bigquery,motherduck",
+        help="Comma-separated list of destinations to write to.",
+    )
+    args = parser.parse_args()
+
+    os.environ.setdefault("STRAVA_DLT_TARGET", "dev")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    from strava_dlt.pipeline import run_pipelines
+
+    destinations = tuple(d.strip() for d in args.destinations.split(",") if d.strip())
+    run_pipelines(target="dev", lookback_days=args.lookback_days, destinations=destinations)

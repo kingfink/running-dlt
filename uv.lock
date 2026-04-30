@@ -1763,6 +1763,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dlt", extra = ["bigquery", "motherduck"] },
+    { name = "modal" },
     { name = "requests" },
 ]
 
@@ -1772,20 +1773,17 @@ dev = [
     { name = "responses" },
     { name = "ruff" },
 ]
-modal = [
-    { name = "modal" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "dlt", extras = ["bigquery", "motherduck"], specifier = ">=1.5.0" },
-    { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64" },
+    { name = "modal", specifier = ">=0.64" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "requests", specifier = ">=2.32" },
     { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]
-provides-extras = ["modal", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "semver"

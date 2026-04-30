@@ -16,8 +16,8 @@ callback domain `localhost`), a BigQuery service account, a MotherDuck token.
 uv sync --extra dev
 cp .dlt/secrets.toml.example .dlt/secrets.toml   # fill in client_id, client_secret, BQ SA, MD token
 uv run python scripts/authorize.py               # one-time: mints refresh_token, paste back into secrets.toml
-uv run python scripts/run_local.py --destinations motherduck   # smoke test
-uv run python scripts/run_local.py                             # both destinations
+uv run python modal_app.py --destinations motherduck   # smoke test
+uv run python modal_app.py                             # both destinations
 ```
 
 Writes to `strava_dev_$USER`. Re-runs are idempotent (merge on `id`).
@@ -31,7 +31,6 @@ Three Modal Secrets:
 - `dlt-motherduck` — `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
 
 ```bash
-uv sync --extra modal
 uv run modal deploy modal_app.py                            # registers the daily cron
 uv run modal run modal_app.py::sync --lookback-days 99999   # one-time backfill
 ```
@@ -47,9 +46,8 @@ function serves both the schedule and ad-hoc invocations.
 | `strava_dlt/source.py` | `@dlt.source` with parent `activity_ids` resource and `activities` transformer. |
 | `strava_dlt/pipeline.py` | `run_pipelines(target, lookback_days, destinations)` — one `dlt.pipeline` per destination. |
 | `strava_dlt/config.py` | `STRAVA_DLT_TARGET=prod\|dev` → dataset name (`strava` vs `strava_dev_$USER`). |
-| `modal_app.py` | Single `sync` function: cron-scheduled and manually invocable. |
+| `modal_app.py` | `sync` function (cron + `modal run`); `python modal_app.py` for local dev. |
 | `scripts/authorize.py` | One-time helper to mint a refresh token. |
-| `scripts/run_local.py` | Manual local run against `strava_dev_$USER`. |
 | `tests/test_source.py` | Smoke test against a stubbed Strava API + local DuckDB. |
 
 ## Notes
