@@ -44,14 +44,9 @@ class StravaClient:
         body = resp.json()
         self._access_token = body["access_token"]
         self._expires_at = float(body["expires_at"])
-        new_refresh = body.get("refresh_token")
-        if new_refresh and new_refresh != self._refresh_token:
-            logger.warning(
-                "Strava rotated the refresh token (new starts with %s...). Update "
-                "STRAVA_REFRESH_TOKEN in your secret store to avoid future auth failures.",
-                new_refresh[:6],
-            )
-            self._refresh_token = new_refresh
+        if (new_rt := body.get("refresh_token")) and new_rt != self._refresh_token:
+            logger.warning("Strava rotated the refresh token — update STRAVA_REFRESH_TOKEN.")
+            self._refresh_token = new_rt
         return self._access_token
 
     def get(self, path: str, params: dict | None = None) -> dict | list:

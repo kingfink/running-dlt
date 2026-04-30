@@ -49,9 +49,10 @@ def strava_source(
 
     @dlt.resource(name="activity_ids", selected=False, write_disposition="replace")
     def activity_ids():
-        # Manual trailing-window watermark. We can't use dlt.sources.incremental
-        # here because Strava's `after` is exclusive and doesn't natively support
-        # a "re-pull the last N days" lookback for capturing edits.
+        # Manual watermark. dlt.sources.incremental tracks per-row state, but
+        # here we want a single API param (`after`) set to
+        # `last_run - lookback_days`, so Strava itself re-emits activities
+        # edited in the trailing window.
         state = dlt.current.resource_state()
         last_synced_epoch = int(state.get("last_synced_epoch", 0))
         after = max(0, last_synced_epoch - max(0, lookback_days) * 86400)
