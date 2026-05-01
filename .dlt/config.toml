@@ -1,13 +1,6 @@
 # Non-secret dlt config. Real secrets live in .dlt/secrets.toml (gitignored)
-# or in environment variables (production).
+# or in environment variables (production). Per-destination project / dataset /
+# location are env-driven (see README) — not configured here.
 
 [runtime]
 log_level = "INFO"
-
-[destination.bigquery]
-location = "US"
-
-[destination.motherduck]
-# Top-level MotherDuck database. Per-pipeline `dataset_name` is the schema
-# inside it, so this can host multiple datasets (e.g. raw.strava, raw.foo).
-database = "raw"

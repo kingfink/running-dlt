@@ -15,20 +15,28 @@ callback domain `localhost`), a BigQuery service account, a MotherDuck token.
 ```bash
 uv sync --extra dev
 cp .dlt/secrets.toml.example .dlt/secrets.toml   # fill in client_id, client_secret, BQ SA, MD token
+
+# Project / dataset / location are env-driven (not in secrets.toml):
+export BIGQUERY_PROJECT=<gcp-project-id>
+export BIGQUERY_DATASET=strava_dev_$USER
+export BIGQUERY_LOCATION=US                      # optional
+export MOTHERDUCK_DATABASE=raw
+export MOTHERDUCK_DATASET=strava_dev_$USER
+
 uv run python scripts/authorize.py               # one-time: mints refresh_token, paste back into secrets.toml
 uv run python modal_app.py --destinations motherduck   # smoke test
 uv run python modal_app.py                             # both destinations
 ```
 
-Writes to `strava_dev_$USER`. Re-runs are idempotent (merge on `id`).
+Re-runs are idempotent (merge on `id`).
 
 ## Deploy to Modal
 
 Three Modal Secrets:
 
 - `strava-oauth` — `SOURCES__STRAVA__CLIENT_ID`, `..._CLIENT_SECRET`, `..._REFRESH_TOKEN`
-- `running-dlt-bq-sync` — `DESTINATION__BIGQUERY__CREDENTIALS__PROJECT_ID`, `..._PRIVATE_KEY`, `..._CLIENT_EMAIL` (service account scoped to one BQ dataset, plus `roles/bigquery.jobUser` at project level)
-- `running-dlt-md-sync` — `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
+- `running-dlt-bq-sync` — `BIGQUERY_PROJECT`, `BIGQUERY_DATASET` (e.g. `strava`), `BIGQUERY_LOCATION` (optional), plus `DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY` and `..._CLIENT_EMAIL` (service account scoped to the target dataset, plus `roles/bigquery.jobUser` at project level)
+- `running-dlt-md-sync` — `MOTHERDUCK_DATABASE` (e.g. `raw`), `MOTHERDUCK_DATASET` (e.g. `strava`), and `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
 
 ```bash
 uv run modal deploy modal_app.py                            # registers the daily cron
@@ -44,8 +52,7 @@ function serves both the schedule and ad-hoc invocations.
 | --- | --- |
 | `strava_dlt/auth.py` | Strava OAuth + retry/backoff client. |
 | `strava_dlt/source.py` | `@dlt.source` with parent `activity_ids` resource and `activities` transformer. |
-| `strava_dlt/pipeline.py` | `run_pipelines(target, lookback_days, destinations)` — one `dlt.pipeline` per destination. |
-| `strava_dlt/config.py` | `STRAVA_DLT_TARGET=prod\|dev` → dataset name (`strava` vs `strava_dev_$USER`). |
+| `strava_dlt/pipeline.py` | `run_pipelines(lookback_days, destinations)` — one `dlt.pipeline` per destination, dataset/project/location read from env. |
 | `modal_app.py` | `sync` function (cron + `modal run`); `python modal_app.py` for local dev. |
 | `scripts/authorize.py` | One-time helper to mint a refresh token. |
 | `tests/test_source.py` | Smoke test against a stubbed Strava API + local DuckDB. |
@@ -55,6 +62,7 @@ function serves both the schedule and ad-hoc invocations.
 - Two pipelines, source extracted twice (once per destination). Simpler than a `filesystem` staging layer; well within Strava's 1000-call/day cap for one athlete.
 - The cron-scheduled `sync` runs with the default `lookback_days=7`. To widen the window, invoke it manually with `modal run modal_app.py::sync --lookback-days N`.
 - Strava sometimes rotates the refresh token. The pipeline logs a `WARNING` if it does — update the Modal Secret manually when you see one.
+- **Env-var layout is provisional.** The current per-destination split (`BIGQUERY_*` / `MOTHERDUCK_*`) mirrors the sibling [`aej-dlt`](https://github.com/kingfink/aej-dlt) repo for consistency, with no built-in environment (prod/dev) split. Once we templatize this and need to support multiple environments cleanly, revisit — likely a layered scheme (e.g. a single `*_ENV` flag toggling dataset suffixes, or per-env Modal secrets).
 
 ## Forking for another REST API
 
@@ -62,4 +70,4 @@ Most of the scaffolding is generic. To swap in a different source:
 
 - Rewrite `strava_dlt/auth.py` (different auth flavor) and `strava_dlt/source.py` (endpoints, incremental column, JSON fields).
 - Rename the `strava_dlt/` package, the Modal app, and the secret names.
-- Everything else (pipeline factory, prod/dev split, cron, merge-on-id) stays.
+- Everything else (pipeline factory, env-driven destination config, cron, merge-on-id) stays.
