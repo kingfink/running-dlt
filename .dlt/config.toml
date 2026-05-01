@@ -1,0 +1,6 @@
+# Non-secret dlt config. Real secrets live in .dlt/secrets.toml (gitignored)
+# or in environment variables (production). Per-destination project / dataset /
+# location are env-driven (see README) — not configured here.
+
+[runtime]
+log_level = "INFO"
