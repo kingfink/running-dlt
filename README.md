@@ -20,7 +20,7 @@ cp .dlt/secrets.toml.example .dlt/secrets.toml   # fill in client_id, client_sec
 export BIGQUERY_PROJECT=<gcp-project-id>
 export BIGQUERY_DATASET=strava_dev_$USER
 export BIGQUERY_LOCATION=US                      # optional
-export MOTHERDUCK_DATABASE=raw
+export MOTHERDUCK_DATABASE=running
 export MOTHERDUCK_DATASET=strava_dev_$USER
 
 uv run python scripts/authorize.py               # one-time: mints refresh_token, paste back into secrets.toml
@@ -36,7 +36,7 @@ Three Modal Secrets:
 
 - `strava-oauth` — `SOURCES__STRAVA__CLIENT_ID`, `..._CLIENT_SECRET`, `..._REFRESH_TOKEN`
 - `running-dlt-bq-sync` — `BIGQUERY_PROJECT`, `BIGQUERY_DATASET` (e.g. `strava`), `BIGQUERY_LOCATION` (optional), plus `DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY` and `..._CLIENT_EMAIL` (service account scoped to the target dataset, plus `roles/bigquery.jobUser` at project level)
-- `running-dlt-md-sync` — `MOTHERDUCK_DATABASE` (e.g. `raw`), `MOTHERDUCK_DATASET` (e.g. `strava`), and `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
+- `running-dlt-md-sync` — `MOTHERDUCK_DATABASE` (e.g. `running`), `MOTHERDUCK_DATASET` (e.g. `strava`), and `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
 
 ```bash
 uv run modal deploy modal_app.py                            # registers the daily cron
