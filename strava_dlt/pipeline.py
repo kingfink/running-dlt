@@ -41,7 +41,10 @@ def run_pipelines(
         )
         logger.info(
             "Running %s -> %s.%s (lookback_days=%d)",
-            pipeline.pipeline_name, destination, dataset_name, lookback_days,
+            pipeline.pipeline_name,
+            destination,
+            dataset_name,
+            lookback_days,
         )
         results[destination] = pipeline.run(strava_source(lookback_days=lookback_days))
     return results

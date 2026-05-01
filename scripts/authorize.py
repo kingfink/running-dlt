@@ -46,9 +46,7 @@ def load_creds() -> tuple[str, str]:
     client_id = strava.get("client_id")
     client_secret = strava.get("client_secret")
     if not client_id or not client_secret:
-        sys.exit(
-            f"{SECRETS_FILE} is missing [sources.strava] client_id and/or client_secret."
-        )
+        sys.exit(f"{SECRETS_FILE} is missing [sources.strava] client_id and/or client_secret.")
     return client_id, client_secret
 
 
