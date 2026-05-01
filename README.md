@@ -35,7 +35,7 @@ Re-runs are idempotent (merge on `id`).
 Three Modal Secrets:
 
 - `strava-oauth` — `SOURCES__STRAVA__CLIENT_ID`, `..._CLIENT_SECRET`, `..._REFRESH_TOKEN`
-- `running-dlt-bq-sync` — `BIGQUERY_PROJECT`, `BIGQUERY_DATASET` (e.g. `strava`), `BIGQUERY_LOCATION` (optional), plus `DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY` and `..._CLIENT_EMAIL` (service account scoped to the target dataset, plus `roles/bigquery.jobUser` at project level)
+- `running-dlt-bq-sync` — `BIGQUERY_PROJECT`, `BIGQUERY_DATASET` (e.g. `strava`), `BIGQUERY_LOCATION` (optional), plus `DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY` and `..._CLIENT_EMAIL` (service account scoped to the target dataset, plus `roles/bigquery.jobUser` at project level). The `private_key` value can be pasted straight from the SA JSON file — escaped `\n` sequences are converted to real PEM newlines at runtime (`strava_dlt/pipeline.py::_normalize_bigquery_private_key_env`). **TODO:** sibling dlt repos (`aej-dlt`) carry the same shim. Long-term, switch to a single `DESTINATION__BIGQUERY__CREDENTIALS` env holding the SA JSON verbatim — dlt's JSON loader handles `\n` correctly and the shim goes away.
 - `running-dlt-md-sync` — `MOTHERDUCK_DATABASE` (e.g. `running`), `MOTHERDUCK_DATASET` (e.g. `strava`), and `DESTINATION__MOTHERDUCK__CREDENTIALS__PASSWORD`
 
 ```bash
