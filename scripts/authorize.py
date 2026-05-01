@@ -58,7 +58,7 @@ def main() -> None:
             "client_id": client_id,
             "response_type": "code",
             "redirect_uri": REDIRECT_URI,
-            "approval_prompt": "auto",
+            "approval_prompt": "force",
             "scope": SCOPE,
         }
     )
@@ -96,7 +96,7 @@ def main() -> None:
     print(f"    {refresh_token}\n")
     print("Next steps:")
     print(f"  Local:   add it to {SECRETS_FILE} under [sources.strava] refresh_token = '...'")
-    print("  Modal:   set STRAVA_REFRESH_TOKEN in the 'strava-oauth' Modal Secret.")
+    print("  Modal:   set SOURCES__STRAVA__REFRESH_TOKEN in the 'strava-oauth' Modal Secret.")
 
 
 if __name__ == "__main__":
