@@ -88,9 +88,12 @@ def test_source_loads_to_duckdb(tmp_path: Path, stub_strava, monkeypatch):
 
         # JSON columns should exist as a single column on the parent row, not
         # as child tables.
-        names = {r[0] for r in c.execute_sql(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'strava_test'"
-        )}
+        names = {
+            r[0]
+            for r in c.execute_sql(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'strava_test'"
+            )
+        }
         # No `activities__splits_metric` etc. child tables.
         assert not any(t.startswith("activities__") for t in names), names
