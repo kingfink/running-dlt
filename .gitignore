@@ -18,3 +18,5 @@ venv/
 # Editors
 .idea/
 .vscode/
+.envrc
+.claude/worktrees/

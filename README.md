@@ -17,7 +17,7 @@ uv sync --extra dev
 cp .dlt/secrets.toml.example .dlt/secrets.toml   # fill in client_id, client_secret, BQ SA, MD token
 
 # Project / dataset / location are env-driven (not in secrets.toml):
-export BIGQUERY_PROJECT=<gcp-project-id>
+export BIGQUERY_PROJECT=running-and-stuff
 export BIGQUERY_DATASET=strava_dev_$USER
 export BIGQUERY_LOCATION=US                      # optional
 export MOTHERDUCK_DATABASE=running
