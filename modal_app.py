@@ -50,15 +50,21 @@ def _resolve_window(since: str | None, until: str | None) -> tuple[datetime, dat
     schedule=modal.Cron("0 6 * * *"),
     timeout=60 * 60,
 )
-def sync(since: str | None = None, until: str | None = None) -> None:
+def sync(since: str = "", until: str = "") -> None:
     """Run both pipelines over `[since, until)`. Cron uses the defaults
     (last 7 days from now). For backfill:
         modal run modal_app.py::sync --since=YYYY-MM-DD --until=YYYY-MM-DD
     Year-at-a-time chunks fit comfortably under Strava's default 1000-call
-    daily quota for a single athlete."""
+    daily quota for a single athlete.
+
+    `since`/`until` are typed `str = ""` rather than `str | None = None` so
+    Modal's web "Try It" UI renders them as text inputs. The web UI doesn't
+    introspect PEP 604 unions and shows them as "unknown type". Empty string
+    is treated as "use the default window."
+    """
     from strava_dlt.pipeline import run_pipelines
 
-    since_dt, until_dt = _resolve_window(since, until)
+    since_dt, until_dt = _resolve_window(since or None, until or None)
     run_pipelines(since=since_dt, until=until_dt)
 
 
