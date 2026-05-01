@@ -23,6 +23,7 @@ def run_pipelines(
     """
     dataset_for: dict[str, str] = {}
     if "bigquery" in destinations:
+        _normalize_bigquery_private_key_env()
         dlt.config["destination.bigquery.project_id"] = _required_env("BIGQUERY_PROJECT")
         if location := os.environ.get("BIGQUERY_LOCATION"):
             dlt.config["destination.bigquery.location"] = location
@@ -48,6 +49,19 @@ def run_pipelines(
         )
         results[destination] = pipeline.run(strava_source(lookback_days=lookback_days))
     return results
+
+
+def _normalize_bigquery_private_key_env() -> None:
+    # Modal Secrets entered via the dashboard often store the SA private key
+    # with literal `\n` sequences instead of real newlines, which makes
+    # `cryptography` reject the PEM at byte 0. Same fix as aej-dlt.
+    # TODO: revisit holistically — sibling repos keep duplicating this; the
+    # cleaner long-term shape is a single `DESTINATION__BIGQUERY__CREDENTIALS`
+    # env holding the SA JSON verbatim, which dlt's JSON loader unescapes.
+    key = "DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY"
+    private_key = os.environ.get(key)
+    if private_key and "\\n" in private_key:
+        os.environ[key] = private_key.replace("\\n", "\n")
 
 
 def _required_env(name: str) -> str:
