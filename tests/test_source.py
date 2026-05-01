@@ -6,6 +6,7 @@ Run with: uv run pytest -q
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dlt
@@ -77,7 +78,8 @@ def test_source_loads_to_duckdb(tmp_path: Path, stub_strava, monkeypatch):
             client_id="cid",
             client_secret="csec",
             refresh_token="rt",
-            lookback_days=7,
+            since=datetime(2024, 1, 1, tzinfo=UTC),
+            until=datetime(2024, 2, 1, tzinfo=UTC),
         )
     )
     assert info.has_failed_jobs is False

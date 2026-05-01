@@ -40,7 +40,8 @@ class StravaClient:
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            _raise_with_body(resp, "/oauth/token")
         body = resp.json()
         self._access_token = body["access_token"]
         self._expires_at = float(body["expires_at"])
@@ -51,6 +52,7 @@ class StravaClient:
 
     def get(self, path: str, params: dict | None = None) -> dict | list:
         url = f"{STRAVA_API_BASE}{path}"
+        resp = None
         for attempt in range(1, 6):
             headers = {"Authorization": f"Bearer {self._access()}"}
             resp = self._session.get(url, headers=headers, params=params, timeout=60)
@@ -63,7 +65,19 @@ class StravaClient:
                 logger.warning("Strava %d on %s — sleeping %ds", resp.status_code, path, wait)
                 time.sleep(wait)
                 continue
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                _raise_with_body(resp, path)
             return resp.json()
-        resp.raise_for_status()
-        return resp.json()
+        # Exhausted retries — surface the last response with body.
+        _raise_with_body(resp, path)
+
+
+def _raise_with_body(resp: requests.Response, path: str) -> None:
+    """Raise HTTPError with Strava's response body included. The default
+    `raise_for_status` message hides the body, which often carries the actual
+    diagnosis (e.g. `{"errors":[{"resource":"AccessToken","field":"scope"}]}`)."""
+    body = resp.text[:500] if resp.text else "<empty body>"
+    raise requests.HTTPError(
+        f"Strava {resp.status_code} on {path}: {body}",
+        response=resp,
+    )

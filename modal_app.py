@@ -1,15 +1,18 @@
 """Strava → BigQuery + MotherDuck dlt pipelines.
 
 Cron + Modal:
-    modal deploy modal_app.py                              # registers the daily cron
-    modal run modal_app.py::sync                           # ad-hoc run on Modal
-    modal run modal_app.py::sync --lookback-days 99999     # full backfill / escape hatch
+    modal deploy modal_app.py                                    # registers daily cron
+    modal run modal_app.py::sync                                 # last 7 days, both destinations
+    modal run modal_app.py::sync --since=2019-01-01 \\
+        --until=2020-01-01                                       # explicit backfill window
 
 Local dev (reads .dlt/secrets.toml + env vars for project/dataset/location):
     python modal_app.py
-    python modal_app.py --lookback-days 90
+    python modal_app.py --since 2024-01-01 --until 2024-02-01
     python modal_app.py --destinations motherduck
 """
+
+from datetime import UTC, datetime, timedelta
 
 import modal
 
@@ -30,18 +33,33 @@ SECRETS = [
 ]
 
 
+def _resolve_window(since: str | None, until: str | None) -> tuple[datetime, datetime]:
+    """Default window: last 7 days through now (UTC). ISO date YYYY-MM-DD
+    on either bound is interpreted as UTC midnight."""
+    now = datetime.now(UTC)
+    until_dt = datetime.fromisoformat(until).replace(tzinfo=UTC) if until else now
+    since_dt = (
+        datetime.fromisoformat(since).replace(tzinfo=UTC) if since else until_dt - timedelta(days=7)
+    )
+    return since_dt, until_dt
+
+
 @app.function(
     image=image,
     secrets=SECRETS,
     schedule=modal.Cron("0 6 * * *"),
     timeout=60 * 60,
 )
-def sync(lookback_days: int = 7) -> None:
-    """Run both pipelines. Cron uses the default; pass a wider
-    `--lookback-days` from `modal run` for backfills or to recover edits."""
+def sync(since: str | None = None, until: str | None = None) -> None:
+    """Run both pipelines over `[since, until)`. Cron uses the defaults
+    (last 7 days from now). For backfill:
+        modal run modal_app.py::sync --since=YYYY-MM-DD --until=YYYY-MM-DD
+    Year-at-a-time chunks fit comfortably under Strava's default 1000-call
+    daily quota for a single athlete."""
     from strava_dlt.pipeline import run_pipelines
 
-    run_pipelines(lookback_days=lookback_days)
+    since_dt, until_dt = _resolve_window(since, until)
+    run_pipelines(since=since_dt, until=until_dt)
 
 
 if __name__ == "__main__":
@@ -49,7 +67,8 @@ if __name__ == "__main__":
     import logging
 
     parser = argparse.ArgumentParser(description="Local dev run.")
-    parser.add_argument("--lookback-days", type=int, default=7)
+    parser.add_argument("--since", help="ISO date YYYY-MM-DD; default: 7 days before --until.")
+    parser.add_argument("--until", help="ISO date YYYY-MM-DD; default: now (UTC).")
     parser.add_argument(
         "--destinations",
         default="bigquery,motherduck",
@@ -64,5 +83,6 @@ if __name__ == "__main__":
 
     from strava_dlt.pipeline import run_pipelines
 
+    since_dt, until_dt = _resolve_window(args.since, args.until)
     destinations = tuple(d.strip() for d in args.destinations.split(",") if d.strip())
-    run_pipelines(lookback_days=args.lookback_days, destinations=destinations)
+    run_pipelines(since=since_dt, until=until_dt, destinations=destinations)

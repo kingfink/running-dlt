@@ -1,18 +1,20 @@
 import logging
 import os
+from datetime import datetime
 
 import dlt
 
-from strava_dlt.source import DEFAULT_LOOKBACK_DAYS, strava_source
+from strava_dlt.source import strava_source
 
 logger = logging.getLogger(__name__)
 
 
 def run_pipelines(
-    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    since: datetime,
+    until: datetime,
     destinations: tuple[str, ...] = ("bigquery", "motherduck"),
 ) -> dict[str, object]:
-    """Run the Strava sync against each destination, sequentially.
+    """Run the Strava sync against each destination over `[since, until)`.
 
     Destination project / dataset / location come from env vars:
       - bigquery: BIGQUERY_PROJECT, BIGQUERY_DATASET, BIGQUERY_LOCATION (optional)
@@ -41,13 +43,14 @@ def run_pipelines(
             dataset_name=dataset_name,
         )
         logger.info(
-            "Running %s -> %s.%s (lookback_days=%d)",
+            "Running %s -> %s.%s (since=%s until=%s)",
             pipeline.pipeline_name,
             destination,
             dataset_name,
-            lookback_days,
+            since.isoformat(),
+            until.isoformat(),
         )
-        results[destination] = pipeline.run(strava_source(lookback_days=lookback_days))
+        results[destination] = pipeline.run(strava_source(since=since, until=until))
     return results
 
 
