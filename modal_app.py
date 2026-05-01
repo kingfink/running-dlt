@@ -5,11 +5,18 @@ Cron + Modal:
     modal run modal_app.py::sync                                 # last 7 days, both destinations
     modal run modal_app.py::sync --since=2019-01-01 \\
         --until=2020-01-01                                       # explicit backfill window
+    modal run modal_app.py::sync --reset-seen=1                  # force refetch (ignore seen_ids)
 
 Local dev (reads .dlt/secrets.toml + env vars for project/dataset/location):
     python modal_app.py
     python modal_app.py --since 2024-01-01 --until 2024-02-01
     python modal_app.py --destinations motherduck
+    python modal_app.py --reset-seen                             # force refetch
+
+Knobs:
+    STRAVA_REFETCH_DAYS  Activities started within this many days of `until` are
+                         always refetched (default 7). Older ones are skipped if
+                         their id is already in pipeline state's `seen_ids`.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -50,22 +57,22 @@ def _resolve_window(since: str | None, until: str | None) -> tuple[datetime, dat
     schedule=modal.Cron("0 6 * * *"),
     timeout=60 * 60,
 )
-def sync(since: str = "", until: str = "") -> None:
+def sync(since: str = "", until: str = "", reset_seen: str = "") -> None:
     """Run both pipelines over `[since, until)`. Cron uses the defaults
     (last 7 days from now). For backfill:
         modal run modal_app.py::sync --since=YYYY-MM-DD --until=YYYY-MM-DD
     Year-at-a-time chunks fit comfortably under Strava's default 1000-call
     daily quota for a single athlete.
 
-    `since`/`until` are typed `str = ""` rather than `str | None = None` so
-    Modal's web "Try It" UI renders them as text inputs. The web UI doesn't
-    introspect PEP 604 unions and shows them as "unknown type". Empty string
-    is treated as "use the default window."
+    `since`/`until`/`reset_seen` are typed `str = ""` rather than richer types
+    so Modal's web "Try It" UI renders them as text inputs (the UI doesn't
+    introspect PEP 604 unions or bools cleanly). Empty string means "use the
+    default"; any non-empty `reset_seen` clears `seen_ids` before running.
     """
     from strava_dlt.pipeline import run_pipelines
 
     since_dt, until_dt = _resolve_window(since or None, until or None)
-    run_pipelines(since=since_dt, until=until_dt)
+    run_pipelines(since=since_dt, until=until_dt, reset_seen=bool(reset_seen))
 
 
 if __name__ == "__main__":
@@ -80,6 +87,11 @@ if __name__ == "__main__":
         default="bigquery,motherduck",
         help="Comma-separated list of destinations to write to.",
     )
+    parser.add_argument(
+        "--reset-seen",
+        action="store_true",
+        help="Clear seen_ids before running so every activity in the window is refetched.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -91,4 +103,9 @@ if __name__ == "__main__":
 
     since_dt, until_dt = _resolve_window(args.since, args.until)
     destinations = tuple(d.strip() for d in args.destinations.split(",") if d.strip())
-    run_pipelines(since=since_dt, until=until_dt, destinations=destinations)
+    run_pipelines(
+        since=since_dt,
+        until=until_dt,
+        destinations=destinations,
+        reset_seen=args.reset_seen,
+    )

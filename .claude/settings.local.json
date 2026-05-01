@@ -17,7 +17,8 @@
       "Bash(gh pr create --base master --head setup-strava-dlt-pipeline --title 'Set up Strava → BigQuery + MotherDuck dlt pipeline on Modal' --body ' *)",
       "Bash(gh pr *)",
       "Bash(gh api *)",
-      "Bash(git restore *)"
+      "Bash(git restore *)",
+      "Bash(uv pip *)"
     ]
   }
 }
