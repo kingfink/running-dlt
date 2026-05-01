@@ -137,11 +137,7 @@ def strava_source(
 
         activity_id = summary["id"]
         start_date = _parse_start_date(summary.get("start_date", ""))
-        if (
-            activity_id in _seen
-            and start_date is not None
-            and start_date < refetch_cutoff
-        ):
+        if activity_id in _seen and start_date is not None and start_date < refetch_cutoff:
             logger.debug(
                 "skipping %s (already loaded, started %s)",
                 activity_id,

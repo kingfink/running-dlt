@@ -145,8 +145,9 @@ def test_skip_already_fetched(tmp_path: Path, monkeypatch):
         d2 = _stub_detail(rsps, 1002, start_date="2024-01-02T10:00:00Z")
 
         info = pipeline.run(
-            strava_source(client_id="c", client_secret="s", refresh_token="rt",
-                          since=SINCE, until=UNTIL)
+            strava_source(
+                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
+            )
         )
         assert info.has_failed_jobs is False
         assert d1.call_count == 1
@@ -156,8 +157,9 @@ def test_skip_already_fetched(tmp_path: Path, monkeypatch):
         # Second run: same window, same summary list. Both ids' start_date is
         # older than the cutoff and both are in seen_ids → skip detail fetches.
         info2 = pipeline.run(
-            strava_source(client_id="c", client_secret="s", refresh_token="rt",
-                          since=SINCE, until=UNTIL)
+            strava_source(
+                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
+            )
         )
         assert info2.has_failed_jobs is False
         assert d1.call_count == 1
@@ -195,8 +197,14 @@ def test_graceful_exit_on_rate_limit(tmp_path: Path, monkeypatch):
 
         status: dict = {}
         info = pipeline.run(
-            strava_source(client_id="c", client_secret="s", refresh_token="rt",
-                          since=SINCE, until=UNTIL, status=status)
+            strava_source(
+                client_id="c",
+                client_secret="s",
+                refresh_token="rt",
+                since=SINCE,
+                until=UNTIL,
+                status=status,
+            )
         )
 
     assert info.has_failed_jobs is False
@@ -227,8 +235,9 @@ def test_reset_seen_forces_refetch(tmp_path: Path, monkeypatch):
 
         # First run populates seen_ids.
         pipeline.run(
-            strava_source(client_id="c", client_secret="s", refresh_token="rt",
-                          since=SINCE, until=UNTIL)
+            strava_source(
+                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
+            )
         )
         assert d1.call_count == 1
         assert d2.call_count == 1
@@ -236,8 +245,14 @@ def test_reset_seen_forces_refetch(tmp_path: Path, monkeypatch):
         # Without reset_seen, second run would skip both. With reset_seen, both
         # are refetched.
         pipeline.run(
-            strava_source(client_id="c", client_secret="s", refresh_token="rt",
-                          since=SINCE, until=UNTIL, reset_seen=True)
+            strava_source(
+                client_id="c",
+                client_secret="s",
+                refresh_token="rt",
+                since=SINCE,
+                until=UNTIL,
+                reset_seen=True,
+            )
         )
         assert d1.call_count == 2
         assert d2.call_count == 2
