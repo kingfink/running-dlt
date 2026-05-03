@@ -19,6 +19,7 @@ Knobs:
                          their id is already in pipeline state's `seen_ids`.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import modal
@@ -38,6 +39,21 @@ SECRETS = [
     modal.Secret.from_name("running-dlt-bq-sync"),
     modal.Secret.from_name("running-dlt-md-sync"),
 ]
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+def _configure_logging(level: int = logging.INFO) -> None:
+    """Ensure Modal and local runs emit our info-level pipeline diagnostics."""
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=level, format=LOG_FORMAT)
+        return
+
+    root.setLevel(level)
+    for handler in root.handlers:
+        if handler.level == logging.NOTSET or handler.level > level:
+            handler.setLevel(level)
 
 
 def _resolve_window(since: str | None, until: str | None) -> tuple[datetime, datetime]:
@@ -71,13 +87,13 @@ def sync(since: str = "", until: str = "", reset_seen: str = "") -> None:
     """
     from strava_dlt.pipeline import run_pipelines
 
+    _configure_logging()
     since_dt, until_dt = _resolve_window(since or None, until or None)
     run_pipelines(since=since_dt, until=until_dt, reset_seen=bool(reset_seen))
 
 
 if __name__ == "__main__":
     import argparse
-    import logging
 
     parser = argparse.ArgumentParser(description="Local dev run.")
     parser.add_argument("--since", help="ISO date YYYY-MM-DD; default: 7 days before --until.")
@@ -94,10 +110,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _configure_logging()
 
     from strava_dlt.pipeline import run_pipelines
 
