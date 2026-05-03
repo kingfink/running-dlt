@@ -7,7 +7,10 @@ Nested arrays (laps, splits, segment efforts) stay as JSON columns on a single
 `activities` table — no child tables. `merge` on activity `id` over an explicit
 `[since, until)` window. Daily cron defaults to `now - 7d` through `now` so the
 last week's activities (including post-hoc title/kudos/gear edits) get refreshed
-each run; backfill is a separate per-window invocation (see below).
+each run; backfill is a separate per-window invocation (see below). Older
+activities are skipped when their ids are already present in destination-backed
+dlt state (`seen_ids`), and that state is written only after the data load
+finishes without failed jobs.
 
 ## Local dev
 
@@ -29,9 +32,11 @@ uv run python scripts/authorize.py               # one-time: mints refresh_token
 uv run python modal_app.py --destinations motherduck                          # last 7 days, MotherDuck only
 uv run python modal_app.py                                                    # last 7 days, both destinations
 uv run python modal_app.py --since 2024-01-01 --until 2024-02-01              # explicit window
+uv run python modal_app.py --reset-seen                                       # force refetch, then rebuild seen_ids
 ```
 
-Re-runs over the same window are idempotent (merge on `id`).
+Re-runs over the same window are idempotent (merge on `id`) and should skip old
+detail fetches once `seen_ids` has been restored from destination state.
 
 ## Deploy to Modal
 
@@ -50,6 +55,9 @@ uv run modal deploy modal_app.py                                              # 
 uv run modal run modal_app.py::sync --since=2019-01-01 --until=2020-01-01
 uv run modal run modal_app.py::sync --since=2020-01-01 --until=2021-01-01
 # ...up to the current year.
+
+# Force a refetch if state needs rebuilding:
+uv run modal run modal_app.py::sync --since=2019-01-01 --until=2020-01-01 --reset-seen=1
 ```
 
 After the backfill, the cron (`0 6 * * *` UTC) takes over with the default
@@ -61,16 +69,16 @@ ad-hoc invocations — pass `--since`/`--until` to override the window.
 | Path | What it does |
 | --- | --- |
 | `strava_dlt/auth.py` | Strava OAuth + retry/backoff client. |
-| `strava_dlt/source.py` | `@dlt.source` with parent `activity_ids` resource and `activities` transformer. Pulls `[since, until)`; stateless. |
-| `strava_dlt/pipeline.py` | `run_pipelines(since, until, destinations)` — one `dlt.pipeline` per destination, dataset/project/location read from env. |
+| `strava_dlt/source.py` | `@dlt.source` with parent `activity_ids` resource and `activities` transformer. Pulls `[since, until)`, reads `seen_ids`, logs request params, and reports extracted/skipped ids. |
+| `strava_dlt/pipeline.py` | `run_pipelines(since, until, destinations)` — one `dlt.pipeline` per destination, dataset/project/location read from env; persists `seen_ids` after successful data loads. |
 | `modal_app.py` | `sync(since, until)` (cron + `modal run`); `python modal_app.py` for local dev. Default window is `now - 7d` through `now` (UTC). |
 | `scripts/authorize.py` | One-time helper to mint a refresh token. |
 | `tests/test_source.py` | Smoke test against a stubbed Strava API + local DuckDB. |
 
 ## Notes
 
-- Two pipelines, source extracted twice (once per destination). Simpler than a `filesystem` staging layer; well within Strava's 1000-call/day cap for one athlete.
-- The cron-scheduled `sync` runs with the default last-7-days window from `now`. Override with `modal run modal_app.py::sync --since=YYYY-MM-DD --until=YYYY-MM-DD`. The pipeline is stateless across runs — what gets fetched is purely a function of the window you pass.
+- Two pipelines, source extracted once per destination. Each destination keeps its own `seen_ids`, so request counts can differ after partial failures or state rebuilds.
+- The cron-scheduled `sync` runs with the default last-7-days window from `now`. Override with `modal run modal_app.py::sync --since=YYYY-MM-DD --until=YYYY-MM-DD`. State logs include the window, API params, extracted/skipped counts, and `Persisted Strava state ...` after the state-only load package succeeds.
 - Strava sometimes rotates the refresh token. The pipeline logs a `WARNING` if it does — update the Modal Secret manually when you see one.
 - **Env-var layout is provisional.** The current per-destination split (`BIGQUERY_*` / `MOTHERDUCK_*`) mirrors the sibling [`aej-dlt`](https://github.com/kingfink/aej-dlt) repo for consistency, with no built-in environment (prod/dev) split. Once we templatize this and need to support multiple environments cleanly, revisit — likely a layered scheme (e.g. a single `*_ENV` flag toggling dataset suffixes, or per-env Modal secrets).
 

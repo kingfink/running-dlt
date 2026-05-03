@@ -77,12 +77,32 @@ def strava_source(
     before_epoch = int(until.timestamp())
     refetch_days = int(os.environ.get("STRAVA_REFETCH_DAYS", "7"))
     refetch_cutoff = until - timedelta(days=refetch_days)
+    status.setdefault("extracted_activity_ids", [])
+    status.setdefault("skipped_activity_ids", [])
+    status["since"] = since.isoformat()
+    status["until"] = until.isoformat()
+    status["after_epoch"] = after_epoch
+    status["before_epoch"] = before_epoch
+    status["refetch_days"] = refetch_days
+    status["refetch_cutoff"] = refetch_cutoff.isoformat()
+    status["reset_seen"] = reset_seen
+
+    logger.info(
+        "Preparing Strava source since=%s until=%s after=%s before=%s refetch_days=%s "
+        "refetch_cutoff=%s reset_seen=%s",
+        since.isoformat(),
+        until.isoformat(),
+        after_epoch,
+        before_epoch,
+        refetch_days,
+        refetch_cutoff.isoformat(),
+        reset_seen,
+    )
 
     # Closure-level flags shared across the resource generators for one run.
     _reset_pending = reset_seen
     _rate_limited = False
     _seen: set[int] | None = None
-    _seen_ids: list[int] | None = None
 
     @dlt.resource(name="activity_ids", selected=False, write_disposition="replace")
     def activity_ids():
@@ -122,7 +142,7 @@ def strava_source(
         columns=_JSON_COLUMNS,
     )
     def activity_detail(summary: dict):
-        nonlocal _reset_pending, _rate_limited, _seen, _seen_ids
+        nonlocal _reset_pending, _rate_limited, _seen
 
         if _rate_limited:
             return
@@ -130,18 +150,28 @@ def strava_source(
         if _seen is None:
             state = dlt.current.resource_state()
             if _reset_pending:
-                state["seen_ids"] = []
+                seen_ids = []
                 _reset_pending = False
-            _seen_ids = state.setdefault("seen_ids", [])
-            _seen = set(_seen_ids)
+                logger.info("Ignoring existing Strava seen state because reset_seen=True")
+            else:
+                seen_ids = list(state.get("seen_ids", []))
+            _seen = set(seen_ids)
+            status["initial_seen_count"] = len(_seen)
+            logger.info(
+                "Read Strava seen state seen_count=%s reset_seen=%s",
+                len(_seen),
+                reset_seen,
+            )
 
         activity_id = summary["id"]
         start_date = _parse_start_date(summary.get("start_date", ""))
         if activity_id in _seen and start_date is not None and start_date < refetch_cutoff:
-            logger.debug(
-                "skipping %s (already loaded, started %s)",
+            status["skipped_activity_ids"].append(activity_id)
+            logger.info(
+                "Skipping Strava activity %s (already seen, start_date=%s, cutoff=%s)",
                 activity_id,
                 summary.get("start_date"),
+                refetch_cutoff.isoformat(),
             )
             return
 
@@ -157,8 +187,7 @@ def strava_source(
             return
 
         yield detail
-        if activity_id not in _seen:
-            _seen.add(activity_id)
-            _seen_ids.append(activity_id)
+        status["extracted_activity_ids"].append(activity_id)
+        _seen.add(activity_id)
 
     return activity_ids, activity_detail

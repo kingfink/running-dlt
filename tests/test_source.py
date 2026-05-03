@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import dlt
 import pytest
 import responses
 
-from strava_dlt.auth import STRAVA_API_BASE, STRAVA_TOKEN_URL
+from strava_dlt.auth import STRAVA_API_BASE, STRAVA_TOKEN_URL, StravaClient
+from strava_dlt.pipeline import run_strava_pipeline
 from strava_dlt.source import strava_source
 
 # Window used across tests. Cutoff = until - 7 days = 2024-01-25, so
@@ -73,14 +75,22 @@ def stub_strava():
         yield rsps
 
 
-def _make_pipeline(tmp_path: Path, name: str = "strava_test") -> dlt.Pipeline:
+def _make_pipeline(
+    tmp_path: Path,
+    name: str = "strava_test",
+    pipelines_dir: Path | None = None,
+) -> dlt.Pipeline:
     """DuckDB pipeline with state isolated to tmp_path so tests don't share state."""
     return dlt.pipeline(
         pipeline_name=name,
         destination=dlt.destinations.duckdb(str(tmp_path / "test.duckdb")),
         dataset_name="strava_test",
-        pipelines_dir=str(tmp_path / "pipelines"),
+        pipelines_dir=str(pipelines_dir or tmp_path / "pipelines"),
     )
+
+
+def _source_kwargs() -> dict[str, str]:
+    return {"client_id": "c", "client_secret": "s", "refresh_token": "rt"}
 
 
 def _seen_ids(pipeline: dlt.Pipeline) -> list[int]:
@@ -144,24 +154,28 @@ def test_skip_already_fetched(tmp_path: Path, monkeypatch):
         d1 = _stub_detail(rsps, 1001, start_date="2024-01-01T10:00:00Z")
         d2 = _stub_detail(rsps, 1002, start_date="2024-01-02T10:00:00Z")
 
-        info = pipeline.run(
-            strava_source(
-                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
-            )
+        info, status = run_strava_pipeline(
+            pipeline,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
         )
         assert info.has_failed_jobs is False
         assert d1.call_count == 1
         assert d2.call_count == 1
+        assert sorted(status["loaded_activity_ids"]) == [1001, 1002]
         assert sorted(_seen_ids(pipeline)) == [1001, 1002]
 
         # Second run: same window, same summary list. Both ids' start_date is
         # older than the cutoff and both are in seen_ids → skip detail fetches.
-        info2 = pipeline.run(
-            strava_source(
-                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
-            )
+        info2, status2 = run_strava_pipeline(
+            pipeline,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
         )
         assert info2.has_failed_jobs is False
+        assert sorted(status2["skipped_activity_ids"]) == [1001, 1002]
         assert d1.call_count == 1
         assert d2.call_count == 1
 
@@ -196,15 +210,11 @@ def test_graceful_exit_on_rate_limit(tmp_path: Path, monkeypatch):
         )
 
         status: dict = {}
-        info = pipeline.run(
-            strava_source(
-                client_id="c",
-                client_secret="s",
-                refresh_token="rt",
-                since=SINCE,
-                until=UNTIL,
-                status=status,
-            )
+        info, status = run_strava_pipeline(
+            pipeline,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
         )
 
     assert info.has_failed_jobs is False
@@ -234,27 +244,120 @@ def test_reset_seen_forces_refetch(tmp_path: Path, monkeypatch):
         d2 = _stub_detail(rsps, 1002, start_date="2024-01-02T10:00:00Z")
 
         # First run populates seen_ids.
-        pipeline.run(
-            strava_source(
-                client_id="c", client_secret="s", refresh_token="rt", since=SINCE, until=UNTIL
-            )
+        run_strava_pipeline(
+            pipeline,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
         )
         assert d1.call_count == 1
         assert d2.call_count == 1
 
         # Without reset_seen, second run would skip both. With reset_seen, both
         # are refetched.
-        pipeline.run(
-            strava_source(
-                client_id="c",
-                client_secret="s",
-                refresh_token="rt",
-                since=SINCE,
-                until=UNTIL,
-                reset_seen=True,
-            )
+        run_strava_pipeline(
+            pipeline,
+            since=SINCE,
+            until=UNTIL,
+            reset_seen=True,
+            source_kwargs=_source_kwargs(),
         )
         assert d1.call_count == 2
         assert d2.call_count == 2
         # seen_ids is rebuilt from this run's successful yields.
         assert sorted(_seen_ids(pipeline)) == [1001, 1002]
+
+
+def test_seen_ids_restore_from_destination_state(tmp_path: Path, monkeypatch, caplog):
+    """A fresh pipeline directory should restore seen_ids from DuckDB state and
+    skip old detail fetches. This proves state made it to the destination, not
+    just the local dlt working folder."""
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("INFO")
+
+    first = _make_pipeline(tmp_path, pipelines_dir=tmp_path / "first_pipelines")
+    fresh = _make_pipeline(tmp_path, pipelines_dir=tmp_path / "fresh_pipelines")
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _stub_token(rsps)
+        _stub_summary_list(
+            rsps,
+            [
+                {"id": 1001, "start_date": "2024-01-01T10:00:00Z", "name": "Morning Run"},
+                {"id": 1002, "start_date": "2024-01-02T10:00:00Z", "name": "Evening Ride"},
+            ],
+        )
+        d1 = _stub_detail(rsps, 1001, start_date="2024-01-01T10:00:00Z")
+        d2 = _stub_detail(rsps, 1002, start_date="2024-01-02T10:00:00Z")
+
+        run_strava_pipeline(
+            first,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
+        )
+        assert sorted(_seen_ids(first)) == [1001, 1002]
+
+        run_strava_pipeline(
+            fresh,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs=_source_kwargs(),
+        )
+
+    assert sorted(_seen_ids(fresh)) == [1001, 1002]
+    assert d1.call_count == 1
+    assert d2.call_count == 1
+    assert "Persisting Strava state after successful data load" in caplog.text
+    assert "Persisted Strava state" in caplog.text
+
+
+def test_seen_ids_not_persisted_when_data_load_has_failed_jobs(monkeypatch):
+    class FakePipeline:
+        pipeline_name = "strava_fake"
+
+        def run(self, source):
+            return SimpleNamespace(has_failed_jobs=True, loads_ids=["failed-load"])
+
+    persist_calls = []
+
+    def fake_source(**kwargs):
+        kwargs["status"]["loaded_activity_ids"] = [1001]
+        return object()
+
+    monkeypatch.setattr("strava_dlt.pipeline.strava_source", fake_source)
+    monkeypatch.setattr(
+        "strava_dlt.pipeline._persist_seen_ids_after_load",
+        lambda *args, **kwargs: persist_calls.append((args, kwargs)),
+    )
+
+    info, status = run_strava_pipeline(
+        FakePipeline(),
+        since=SINCE,
+        until=UNTIL,
+        source_kwargs=_source_kwargs(),
+    )
+
+    assert info.has_failed_jobs is True
+    assert status["loaded_activity_ids"] == [1001]
+    assert persist_calls == []
+
+
+def test_client_logs_get_requests(caplog):
+    caplog.set_level("INFO", logger="strava_dlt.auth")
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _stub_token(rsps)
+        _stub_summary_list(rsps, [])
+
+        client = StravaClient("c", "s", "rt")
+        assert client.get("/athlete/activities", params={"after": 1, "before": 2}) == []
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "Strava GET /athlete/activities" in m
+        and "params={'after': 1, 'before': 2}" in m
+        and "attempt=1" in m
+        for m in messages
+    )
+    assert any("Strava GET /athlete/activities" in m and "status=200" in m for m in messages)
