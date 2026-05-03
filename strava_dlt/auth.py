@@ -36,6 +36,7 @@ class StravaClient:
     def _access(self) -> str:
         if self._access_token and time.time() < self._expires_at - 60:
             return self._access_token
+        logger.info("Refreshing Strava access token")
         resp = requests.post(
             STRAVA_TOKEN_URL,
             data={
@@ -51,6 +52,7 @@ class StravaClient:
         body = resp.json()
         self._access_token = body["access_token"]
         self._expires_at = float(body["expires_at"])
+        logger.info("Refreshed Strava access token expires_at=%s", self._expires_at)
         if (new_rt := body.get("refresh_token")) and new_rt != self._refresh_token:
             logger.warning("Strava rotated the refresh token — update STRAVA_REFRESH_TOKEN.")
             self._refresh_token = new_rt
@@ -64,14 +66,30 @@ class StravaClient:
         resp = None
         for attempt in range(1, 4):
             headers = {"Authorization": f"Bearer {self._access()}"}
+            logger.info("Strava GET %s params=%s attempt=%s", path, params or {}, attempt)
             resp = self._session.get(url, headers=headers, params=params, timeout=60)
+            logger.info(
+                "Strava GET %s params=%s attempt=%s status=%s rate_limit=%s",
+                path,
+                params or {},
+                attempt,
+                resp.status_code,
+                _rate_limit_headers(resp),
+            )
 
             if resp.status_code == 401 and attempt == 1:
+                logger.warning("Strava 401 on %s — refreshing token and retrying", path)
                 self._access_token = None  # force re-mint
                 continue
             if resp.status_code == 429 or 500 <= resp.status_code < 600:
                 wait = 60 * 2 ** (attempt - 1)
-                logger.warning("Strava %d on %s — sleeping %ds", resp.status_code, path, wait)
+                logger.warning(
+                    "Strava %d on %s params=%s — sleeping %ds",
+                    resp.status_code,
+                    path,
+                    params or {},
+                    wait,
+                )
                 time.sleep(wait)
                 continue
             if resp.status_code >= 400:
@@ -85,6 +103,14 @@ class StravaClient:
                 f"Strava 429 on {path} after retries: {body}", response=resp
             )
         _raise_with_body(resp, path)
+
+
+def _rate_limit_headers(resp: requests.Response) -> str:
+    limit = resp.headers.get("X-RateLimit-Limit")
+    usage = resp.headers.get("X-RateLimit-Usage")
+    if limit or usage:
+        return f"usage={usage or '?'} limit={limit or '?'}"
+    return "unavailable"
 
 
 def _raise_with_body(resp: requests.Response, path: str) -> None:

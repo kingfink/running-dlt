@@ -1,8 +1,10 @@
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
 
 import dlt
+from dlt.common.pipeline import TPipelineState
 
 from strava_dlt.source import strava_source
 
@@ -64,10 +66,13 @@ def run_pipelines(
             until.isoformat(),
             reset_seen,
         )
-        status: dict = {}
-        results[destination] = pipeline.run(
-            strava_source(since=since, until=until, status=status, reset_seen=reset_seen)
+        info, status = run_strava_pipeline(
+            pipeline,
+            since=since,
+            until=until,
+            reset_seen=reset_seen,
         )
+        results[destination] = info
         if path := status.get("rate_limited_path"):
             rate_limited[destination] = path
 
@@ -76,6 +81,182 @@ def run_pipelines(
             f"Rate-limited mid-run; partial data committed. Destinations affected: {rate_limited}"
         )
     return results
+
+
+def run_strava_pipeline(
+    pipeline: dlt.Pipeline,
+    *,
+    since: datetime,
+    until: datetime,
+    reset_seen: bool = False,
+    source_kwargs: dict[str, Any] | None = None,
+) -> tuple[object, dict[str, Any]]:
+    """Run one Strava pipeline and persist `seen_ids` only after data loads.
+
+    The source reads existing `seen_ids` so it can skip old details, but it only
+    reports ids that were extracted in this process. Once dlt reports that the
+    data load finished without failed jobs, we write those ids to pipeline state
+    in a second state-only load package. That keeps the state write after the
+    data persistence boundary.
+    """
+    status: dict[str, Any] = {}
+    source_kwargs = dict(source_kwargs or {})
+
+    logger.info(
+        "Starting Strava data load pipeline=%s since=%s until=%s reset_seen=%s local_seen_count=%s",
+        pipeline.pipeline_name,
+        since.isoformat(),
+        until.isoformat(),
+        reset_seen,
+        len(_seen_ids_from_state(getattr(pipeline, "state", {}))),
+    )
+    info = pipeline.run(
+        strava_source(
+            since=since,
+            until=until,
+            status=status,
+            reset_seen=reset_seen,
+            **source_kwargs,
+        )
+    )
+
+    extracted_ids = _unique_ints(status.get("extracted_activity_ids", []))
+    loaded_ids = _unique_ints(status.get("loaded_activity_ids", extracted_ids))
+    status["loaded_activity_ids"] = loaded_ids
+
+    logger.info(
+        "Finished Strava data load pipeline=%s has_failed_jobs=%s load_ids=%s "
+        "extracted_activity_count=%s skipped_activity_count=%s rate_limited_path=%s",
+        pipeline.pipeline_name,
+        getattr(info, "has_failed_jobs", None),
+        getattr(info, "loads_ids", None),
+        len(extracted_ids),
+        len(status.get("skipped_activity_ids", [])),
+        status.get("rate_limited_path"),
+    )
+
+    if getattr(info, "has_failed_jobs", False):
+        logger.warning(
+            "Not persisting Strava state because data load reported failed jobs "
+            "pipeline=%s load_ids=%s extracted_activity_count=%s",
+            pipeline.pipeline_name,
+            getattr(info, "loads_ids", None),
+            len(extracted_ids),
+        )
+        return info, status
+
+    _persist_seen_ids_after_load(
+        pipeline,
+        activity_ids=loaded_ids,
+        since=since,
+        until=until,
+        reset_seen=reset_seen,
+    )
+    return info, status
+
+
+def _persist_seen_ids_after_load(
+    pipeline: dlt.Pipeline,
+    *,
+    activity_ids: list[int],
+    since: datetime,
+    until: datetime,
+    reset_seen: bool,
+) -> object:
+    logger.info(
+        "Persisting Strava state after successful data load pipeline=%s since=%s "
+        "until=%s loaded_activity_count=%s reset_seen=%s",
+        pipeline.pipeline_name,
+        since.isoformat(),
+        until.isoformat(),
+        len(activity_ids),
+        reset_seen,
+    )
+
+    before_count = 0
+    after_count = 0
+    added_count = 0
+    with pipeline.managed_state(extract_state=True) as state:
+        resource_state = _strava_activities_resource_state(state)
+        before_seen = _unique_ints(resource_state.get("seen_ids", []))
+        before_count = len(before_seen)
+
+        if reset_seen:
+            merged_seen = []
+            seen_set: set[int] = set()
+        else:
+            merged_seen = list(before_seen)
+            seen_set = set(before_seen)
+
+        for activity_id in activity_ids:
+            if activity_id not in seen_set:
+                merged_seen.append(activity_id)
+                seen_set.add(activity_id)
+
+        resource_state["seen_ids"] = merged_seen
+        resource_state["last_successful_window"] = {
+            "since": since.isoformat(),
+            "until": until.isoformat(),
+            "completed_at": datetime.now(UTC).isoformat(),
+            "loaded_activity_count": len(activity_ids),
+            "reset_seen": reset_seen,
+        }
+        after_count = len(merged_seen)
+        added_count = max(after_count - before_count, 0)
+
+    pipeline.normalize()
+    state_info = pipeline.load()
+    if getattr(state_info, "has_failed_jobs", False):
+        raise RuntimeError(
+            "Failed to persist Strava state after successful data load "
+            f"pipeline={pipeline.pipeline_name} load_ids={getattr(state_info, 'loads_ids', None)}"
+        )
+
+    logger.info(
+        "Persisted Strava state pipeline=%s state_load_ids=%s seen_count_before=%s "
+        "seen_count_after=%s added_seen_ids=%s",
+        pipeline.pipeline_name,
+        getattr(state_info, "loads_ids", None),
+        before_count,
+        after_count,
+        added_count,
+    )
+    return state_info
+
+
+def _strava_activities_resource_state(state: TPipelineState) -> dict[str, Any]:
+    return (
+        state.setdefault("sources", {})
+        .setdefault("strava", {})
+        .setdefault("resources", {})
+        .setdefault("activities", {})
+    )
+
+
+def _seen_ids_from_state(state: TPipelineState) -> list[int]:
+    return _unique_ints(
+        state.get("sources", {})
+        .get("strava", {})
+        .get("resources", {})
+        .get("activities", {})
+        .get("seen_ids", [])
+    )
+
+
+def _unique_ints(values: object) -> list[int]:
+    if not isinstance(values, list):
+        return []
+    seen: set[int] = set()
+    unique: list[int] = []
+    for value in values:
+        try:
+            item = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item not in seen:
+            unique.append(item)
+            seen.add(item)
+    return unique
 
 
 def _normalize_bigquery_private_key_env() -> None:
