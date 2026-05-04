@@ -48,6 +48,13 @@ def run_pipelines(
         dlt.config["destination.motherduck.database"] = _required_env("MOTHERDUCK_DATABASE")
         dataset_for["motherduck"] = _required_env("MOTHERDUCK_DATASET")
 
+    # Shared per-run cache: the first destination's source populates it from
+    # `/activities/{id}` responses, the second reads them and skips the GET.
+    # Halves Strava API call count on backfills (the dominant rate-limit cost)
+    # without reintroducing the filesystem-staging layer rejected in the
+    # original design.
+    detail_cache: dict[int, dict] = {}
+
     results: dict[str, object] = {}
     rate_limited: dict[str, str] = {}
     for destination in destinations:
@@ -58,19 +65,21 @@ def run_pipelines(
             dataset_name=dataset_name,
         )
         logger.info(
-            "Running %s -> %s.%s (since=%s until=%s reset_seen=%s)",
+            "Running %s -> %s.%s (since=%s until=%s reset_seen=%s detail_cache_size=%s)",
             pipeline.pipeline_name,
             destination,
             dataset_name,
             since.isoformat(),
             until.isoformat(),
             reset_seen,
+            len(detail_cache),
         )
         info, status = run_strava_pipeline(
             pipeline,
             since=since,
             until=until,
             reset_seen=reset_seen,
+            source_kwargs={"detail_cache": detail_cache},
         )
         results[destination] = info
         if path := status.get("rate_limited_path"):
@@ -126,12 +135,14 @@ def run_strava_pipeline(
 
     logger.info(
         "Finished Strava data load pipeline=%s has_failed_jobs=%s load_ids=%s "
-        "extracted_activity_count=%s skipped_activity_count=%s rate_limited_path=%s",
+        "extracted_activity_count=%s skipped_activity_count=%s "
+        "cache_hit_activity_count=%s rate_limited_path=%s",
         pipeline.pipeline_name,
         getattr(info, "has_failed_jobs", None),
         getattr(info, "loads_ids", None),
         len(extracted_ids),
         len(status.get("skipped_activity_ids", [])),
+        len(status.get("cache_hit_activity_ids", [])),
         status.get("rate_limited_path"),
     )
 

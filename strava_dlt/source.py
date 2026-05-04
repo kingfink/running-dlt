@@ -54,6 +54,7 @@ def strava_source(
     refresh_token: str = dlt.secrets.value,
     status: dict | None = None,
     reset_seen: bool = False,
+    detail_cache: dict[int, dict] | None = None,
 ):
     """Strava activity source over a half-open `[since, until)` window.
 
@@ -70,6 +71,13 @@ def strava_source(
     `start_date` is older than `STRAVA_REFETCH_DAYS` (default 7) before `until`
     — recent activities are still refetched in case they were edited. Pass
     `reset_seen=True` to clear `seen_ids` and force a full refetch.
+
+    Cross-destination cache: `detail_cache` is an optional `{id: detail_dict}`
+    mapping shared across destinations within one `run_pipelines` invocation.
+    When the second destination's source sees an id already in the cache, it
+    skips the `/activities/{id}` fetch and yields the cached payload. This
+    halves the API call count on backfills (the dominant rate-limit cost),
+    without reintroducing the filesystem-staging layer.
     """
     status = status if status is not None else {}
     client = StravaClient(client_id, client_secret, refresh_token)
@@ -175,6 +183,16 @@ def strava_source(
             )
             return
 
+        # Cache hit: another destination in the same `run_pipelines` call
+        # already fetched this detail. Reuse the payload, skip the API call,
+        # but still record it so seen_ids and load tracking work normally.
+        if detail_cache is not None and activity_id in detail_cache:
+            status.setdefault("cache_hit_activity_ids", []).append(activity_id)
+            yield detail_cache[activity_id]
+            status["extracted_activity_ids"].append(activity_id)
+            _seen.add(activity_id)
+            return
+
         try:
             detail = client.get(f"/activities/{activity_id}")
         except StravaRateLimitExceeded:
@@ -186,6 +204,8 @@ def strava_source(
             _rate_limited = True
             return
 
+        if detail_cache is not None and isinstance(detail, dict):
+            detail_cache[activity_id] = detail
         yield detail
         status["extracted_activity_ids"].append(activity_id)
         _seen.add(activity_id)
