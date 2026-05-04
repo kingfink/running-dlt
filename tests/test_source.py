@@ -14,7 +14,16 @@ import dlt
 import pytest
 import responses
 
-from strava_dlt.auth import STRAVA_API_BASE, STRAVA_TOKEN_URL, StravaClient
+import requests
+
+from strava_dlt.auth import (
+    STRAVA_API_BASE,
+    STRAVA_READ_WINDOW_SECONDS,
+    STRAVA_TOKEN_URL,
+    StravaClient,
+    _retry_after_seconds,
+    _seconds_to_next_window,
+)
 from strava_dlt.pipeline import run_strava_pipeline
 from strava_dlt.source import strava_source
 
@@ -341,6 +350,129 @@ def test_seen_ids_not_persisted_when_data_load_has_failed_jobs(monkeypatch):
     assert info.has_failed_jobs is True
     assert status["loaded_activity_ids"] == [1001]
     assert persist_calls == []
+
+
+def test_detail_cache_shared_across_destinations(tmp_path: Path, monkeypatch):
+    """A `detail_cache` dict shared across two `run_strava_pipeline` calls
+    lets the second destination's source skip `/activities/{id}` fetches that
+    the first destination already made — the dominant rate-limit win for
+    backfills, and the reason backfills no longer hit Strava 2x per id."""
+    monkeypatch.chdir(tmp_path)
+    bq = _make_pipeline(tmp_path, name="strava_bq", pipelines_dir=tmp_path / "bq")
+    md = _make_pipeline(tmp_path, name="strava_md", pipelines_dir=tmp_path / "md")
+    detail_cache: dict[int, dict] = {}
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _stub_token(rsps)
+        _stub_summary_list(
+            rsps,
+            [
+                {"id": 1001, "start_date": "2024-01-01T10:00:00Z", "name": "Morning Run"},
+                {"id": 1002, "start_date": "2024-01-02T10:00:00Z", "name": "Evening Ride"},
+            ],
+        )
+        d1 = _stub_detail(rsps, 1001, start_date="2024-01-01T10:00:00Z")
+        d2 = _stub_detail(rsps, 1002, start_date="2024-01-02T10:00:00Z")
+
+        info1, status1 = run_strava_pipeline(
+            bq,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs={**_source_kwargs(), "detail_cache": detail_cache},
+        )
+        assert info1.has_failed_jobs is False
+        assert d1.call_count == 1
+        assert d2.call_count == 1
+        assert sorted(detail_cache.keys()) == [1001, 1002]
+        assert status1.get("cache_hit_activity_ids", []) == []
+
+        # Second destination starts with empty seen_ids (separate pipeline)
+        # but inherits the populated cache → no extra `/activities/{id}` calls.
+        info2, status2 = run_strava_pipeline(
+            md,
+            since=SINCE,
+            until=UNTIL,
+            source_kwargs={**_source_kwargs(), "detail_cache": detail_cache},
+        )
+        assert info2.has_failed_jobs is False
+        assert d1.call_count == 1
+        assert d2.call_count == 1
+        assert sorted(status2["cache_hit_activity_ids"]) == [1001, 1002]
+        assert sorted(status2["loaded_activity_ids"]) == [1001, 1002]
+
+    with md.sql_client() as c:
+        ids = sorted(r[0] for r in c.execute_sql("SELECT id FROM activities"))
+        assert ids == [1001, 1002]
+
+
+def test_get_retries_on_connection_error(monkeypatch):
+    """Today's failing run died because a `RemoteDisconnected` mid-pagination
+    bubbled out of `client.get` un-retried, killing a 25-min backfill on a
+    transient TCP reset. The retry wrapper should now treat it like a 5xx."""
+    monkeypatch.setattr("strava_dlt.auth.time.sleep", lambda *_: None)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _stub_token(rsps)
+        # First call: connection drops mid-response. Second call: succeeds.
+        rsps.get(
+            f"{STRAVA_API_BASE}/athlete/activities",
+            body=requests.ConnectionError("Remote end closed connection"),
+        )
+        rsps.get(
+            f"{STRAVA_API_BASE}/athlete/activities",
+            json=[{"id": 1, "start_date": "2024-01-01T10:00:00Z"}],
+        )
+
+        client = StravaClient("c", "s", "rt")
+        result = client.get("/athlete/activities")
+        assert result == [{"id": 1, "start_date": "2024-01-01T10:00:00Z"}]
+
+
+def test_get_raises_after_exhausting_connection_retries(monkeypatch):
+    """If transport errors persist beyond the retry budget, raise — don't
+    silently return None and confuse the caller."""
+    monkeypatch.setattr("strava_dlt.auth.time.sleep", lambda *_: None)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _stub_token(rsps)
+        # 4 consecutive connection errors — exceeds the 4-attempt retry budget.
+        for _ in range(5):
+            rsps.get(
+                f"{STRAVA_API_BASE}/athlete/activities",
+                body=requests.ConnectionError("kaboom"),
+            )
+
+        client = StravaClient("c", "s", "rt")
+        with pytest.raises(requests.ConnectionError):
+            client.get("/athlete/activities")
+
+
+def test_seconds_to_next_window_aligns_to_15min_boundary():
+    """Sleep to the next wall-clock 15-min boundary, not a fixed 60s — Strava's
+    rate-limit window resets at :00, :15, :30, :45 UTC, so a 60s sleep often
+    lands inside the same window and earns another 429."""
+    # Pick an epoch that's snapped to a 15-min boundary so the math is clean.
+    boundary = 1_700_000_000 - (1_700_000_000 % STRAVA_READ_WINDOW_SECONDS)
+
+    # 1s after boundary → ~15 min till next, plus 5–15s buffer/jitter.
+    wait = _seconds_to_next_window(boundary + 1)
+    expected_min = STRAVA_READ_WINDOW_SECONDS - 1 + 5
+    expected_max = STRAVA_READ_WINDOW_SECONDS - 1 + 15
+    assert expected_min <= wait <= expected_max
+
+    # 60s before next boundary → ~60s + buffer.
+    wait = _seconds_to_next_window(boundary + STRAVA_READ_WINDOW_SECONDS - 60)
+    assert 65 <= wait <= 75
+
+
+def test_retry_after_header_is_honored():
+    """Strava sometimes sends `Retry-After: <seconds>` on 429. Trust it."""
+    resp = SimpleNamespace(headers={"Retry-After": "42"})
+    assert _retry_after_seconds(resp) == 42
+
+    # Garbage / missing header falls back to next-window sleep.
+    assert _retry_after_seconds(SimpleNamespace(headers={"Retry-After": "junk"})) >= 5
+    assert _retry_after_seconds(SimpleNamespace(headers={})) >= 5
 
 
 def test_client_logs_get_requests(caplog):
