@@ -12,9 +12,8 @@ from types import SimpleNamespace
 
 import dlt
 import pytest
-import responses
-
 import requests
+import responses
 
 from strava_dlt.auth import (
     STRAVA_API_BASE,

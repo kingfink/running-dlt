@@ -144,9 +144,7 @@ class StravaClient:
                 f"Strava 429 on {path} after retries: {body}", response=resp
             )
         if resp is None:
-            raise requests.ConnectionError(
-                f"Strava {path}: transport errors exhausted retries"
-            )
+            raise requests.ConnectionError(f"Strava {path}: transport errors exhausted retries")
         _raise_with_body(resp, path)
 
 
