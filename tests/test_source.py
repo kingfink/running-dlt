@@ -14,17 +14,17 @@ import dlt
 import pytest
 import requests
 import responses
-
-from strava_dlt.auth import (
+from tailor_made_dlt_sources.strava import (
     STRAVA_API_BASE,
     STRAVA_READ_WINDOW_SECONDS,
     STRAVA_TOKEN_URL,
     StravaClient,
     _retry_after_seconds,
     _seconds_to_next_window,
+    strava_source,
 )
+
 from strava_dlt.pipeline import run_strava_pipeline
-from strava_dlt.source import strava_source
 
 # Window used across tests. Cutoff = until - 7 days = 2024-01-25, so
 # start_dates earlier than that are eligible for skip-if-seen.
@@ -197,7 +197,7 @@ def test_graceful_exit_on_rate_limit(tmp_path: Path, monkeypatch):
     rows already yielded are loaded, the rate-limited path is recorded in
     `status`, and seen_ids contains only successfully-loaded ids."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("strava_dlt.auth.time.sleep", lambda *_: None)
+    monkeypatch.setattr("tailor_made_dlt_sources.strava.auth.time.sleep", lambda *_: None)
     pipeline = _make_pipeline(tmp_path)
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
@@ -408,7 +408,7 @@ def test_get_retries_on_connection_error(monkeypatch):
     """Today's failing run died because a `RemoteDisconnected` mid-pagination
     bubbled out of `client.get` un-retried, killing a 25-min backfill on a
     transient TCP reset. The retry wrapper should now treat it like a 5xx."""
-    monkeypatch.setattr("strava_dlt.auth.time.sleep", lambda *_: None)
+    monkeypatch.setattr("tailor_made_dlt_sources.strava.auth.time.sleep", lambda *_: None)
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         _stub_token(rsps)
@@ -430,7 +430,7 @@ def test_get_retries_on_connection_error(monkeypatch):
 def test_get_raises_after_exhausting_connection_retries(monkeypatch):
     """If transport errors persist beyond the retry budget, raise — don't
     silently return None and confuse the caller."""
-    monkeypatch.setattr("strava_dlt.auth.time.sleep", lambda *_: None)
+    monkeypatch.setattr("tailor_made_dlt_sources.strava.auth.time.sleep", lambda *_: None)
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         _stub_token(rsps)
@@ -475,7 +475,7 @@ def test_retry_after_header_is_honored():
 
 
 def test_client_logs_get_requests(caplog):
-    caplog.set_level("INFO", logger="strava_dlt.auth")
+    caplog.set_level("INFO", logger="tailor_made_dlt_sources.strava.auth")
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         _stub_token(rsps)

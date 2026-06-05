@@ -5,8 +5,7 @@ from typing import Any
 
 import dlt
 from dlt.common.pipeline import TPipelineState
-
-from strava_dlt.source import strava_source
+from tailor_made_dlt_sources.strava import strava_source
 
 logger = logging.getLogger(__name__)
 

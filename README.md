@@ -68,8 +68,7 @@ ad-hoc invocations — pass `--since`/`--until` to override the window.
 
 | Path | What it does |
 | --- | --- |
-| `strava_dlt/auth.py` | Strava OAuth + retry/backoff client. |
-| `strava_dlt/source.py` | `@dlt.source` with parent `activity_ids` resource and `activities` transformer. Pulls `[since, until)`, reads `seen_ids`, logs request params, and reports extracted/skipped ids. |
+| `tailor_made_dlt_sources.strava` | Shared Strava OAuth client and `@dlt.source` with parent `activity_ids` resource and `activities` transformer. Pulls `[since, until)`, reads `seen_ids`, logs request params, and reports extracted/skipped ids. |
 | `strava_dlt/pipeline.py` | `run_pipelines(since, until, destinations)` — one `dlt.pipeline` per destination, dataset/project/location read from env; persists `seen_ids` after successful data loads. |
 | `modal_app.py` | `sync(since, until)` (cron + `modal run`); `python modal_app.py` for local dev. Default window is `now - 7d` through `now` (UTC). |
 | `scripts/authorize.py` | One-time helper to mint a refresh token. |
@@ -84,8 +83,7 @@ ad-hoc invocations — pass `--since`/`--until` to override the window.
 
 ## Forking for another REST API
 
-Most of the scaffolding is generic. To swap in a different source:
-
-- Rewrite `strava_dlt/auth.py` (different auth flavor) and `strava_dlt/source.py` (endpoints, incremental column, JSON fields).
-- Rename the `strava_dlt/` package, the Modal app, and the secret names.
-- Everything else (pipeline factory, env-driven destination config, cron, merge-on-id) stays.
+Most of the orchestration is generic. To swap in a different source, add or
+import another `tailor_made_dlt_sources` source, then update `strava_dlt/pipeline.py`
+and the Modal app / secret names. Destination setup, cron, and state persistence
+stay local to this repo.
