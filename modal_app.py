@@ -26,6 +26,7 @@ import modal
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
+    .apt_install("git")
     .pip_install_from_pyproject("pyproject.toml")
     .add_local_python_source("strava_dlt")
 )
