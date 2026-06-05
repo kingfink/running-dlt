@@ -272,10 +272,7 @@ def _unique_ints(values: object) -> list[int]:
 def _normalize_bigquery_private_key_env() -> None:
     # Modal Secrets entered via the dashboard often store the SA private key
     # with literal `\n` sequences instead of real newlines, which makes
-    # `cryptography` reject the PEM at byte 0. Same fix as aej-dlt.
-    # TODO: revisit holistically — sibling repos keep duplicating this; the
-    # cleaner long-term shape is a single `DESTINATION__BIGQUERY__CREDENTIALS`
-    # env holding the SA JSON verbatim, which dlt's JSON loader unescapes.
+    # `cryptography` reject the PEM at byte 0.
     key = "DESTINATION__BIGQUERY__CREDENTIALS__PRIVATE_KEY"
     private_key = os.environ.get(key)
     if private_key and "\\n" in private_key:
