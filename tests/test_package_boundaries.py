@@ -22,7 +22,9 @@ def test_project_depends_on_tailor_made_dlt_sources_package() -> None:
     dependencies = pyproject["project"]["dependencies"]
 
     assert any(
-        dependency.startswith("tailor-made-dlt-sources @ git+https://github.com/kingfink/dlt-sources")
+        dependency.startswith(
+            "tailor-made-dlt-sources @ git+https://github.com/kingfink/dlt-sources"
+        )
         for dependency in dependencies
     )
     assert not any(dependency.startswith("kingfink-dlt-sources") for dependency in dependencies)
