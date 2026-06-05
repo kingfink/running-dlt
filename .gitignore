@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.uv-cache/
 .pytest_cache/
 .ruff_cache/
 
@@ -18,5 +19,6 @@ venv/
 # Editors
 .idea/
 .vscode/
+.env
 .envrc
-.claude/worktrees/
+.claude/
