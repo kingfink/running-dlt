@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dlt[bigquery,motherduck]>=1.5.0",
+    "tailor-made-dlt-sources @ git+https://github.com/kingfink/dlt-sources@v0.1.0",
     "modal>=0.64",
     "requests>=2.32",
 ]
@@ -19,6 +20,9 @@ dev = [
 
 [tool.uv]
 package = true
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["strava_dlt"]
